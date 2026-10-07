@@ -49,20 +49,16 @@ test('/lens answers settings and unknown words with help instead of toggling', a
   expect(again.text).toContain('expanded')
 })
 
-test('the system prompt asks the model to post a plan', async ($, on) => {
-  on('prompt.compose', () => ({ sections: [{ id: 'base', text: 'You are helpful.', scope: 'shared' as const }] }))
-  const out = await ($ as any).prompt.compose({
-    model: 'm',
-    promptModel: 'm',
-    surfaces: ['terminal'],
-    tools: [],
-    outputStyle: null,
-    traits: [],
-  })
-  const ours = out.sections.find((s: { id: string }) => s.id === 'tool-lens-plan')
-  expect(ours).toBeDefined()
-  expect(ours.text).toContain('mcp__tool-lens-mod__plan')
-  expect(out.sections.length).toBe(2)
+test('every prompt carries the plan reminder as hidden context, and /lens off withdraws it', async ($, on) => {
+  on('prompt.submit', (_$, e) => ({ text: e.text, context: e.context }) as never)
+  const sent = await ($ as any).prompt.submit({ text: 'find where X is configured and summarize it' })
+  expect(JSON.stringify(sent.context)).toContain('mcp__tool-lens-mod__plan')
+  expect(sent.text).toBe('find where X is configured and summarize it')
+
+  await $.command.run({ command: 'lens', args: 'off' } as never)
+  const quiet = await ($ as any).prompt.submit({ text: 'again' })
+  expect(JSON.stringify(quiet.context ?? [])).not.toContain('mcp__tool-lens-mod__plan')
+  await $.command.run({ command: 'lens', args: 'on' } as never)
 })
 
 test('/lens off hides the band and stops tracking, /lens on brings it back', async ($, on) => {
@@ -99,4 +95,22 @@ test('/lens off hides the band and stops tracking, /lens on brings it back', asy
   expect(await shown.find({ key: 'expand' })).toBeDefined()
   expect((await shown.find({ key: 'step' }))?.text).toBe('1 step')
   await shown.unmount()
+})
+
+test('the plan tool is listed in front of the model, not behind tool search', async ($, on) => {
+  on('tool.describe', (_$, e) => ({ description: e.description, isDeferred: true as const }))
+  const out = await ($ as any).tool.describe({
+    tool: 'mcp__tool-lens-mod__plan',
+    description: 'plan',
+    isDeferred: true,
+    provider: { plugin: 'tool-lens-mod', tier: 'user' },
+  })
+  expect(out.isDeferred).toBe(false)
+  const other = await ($ as any).tool.describe({
+    tool: 'mcp__someone-else__thing',
+    description: 'other',
+    isDeferred: true,
+    provider: { plugin: 'x', tier: 'user' },
+  })
+  expect(other.isDeferred).toBe(true)
 })

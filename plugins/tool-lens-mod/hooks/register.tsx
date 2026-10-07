@@ -5,6 +5,10 @@ import type { Phase, Step, Todo, Turn } from '../types'
 import { CATS, barRuns, classify, clip, counts, describe, fillOf, fmtMs, labelPrompt, needsLabel, parseLabel, redact, sizeOf, summarize, timeUnder } from './lens'
 
 const PLAN_TOOL = 'mcp__tool-lens-mod__plan'
+const PLAN_REMINDER =
+  `Tool lens: if this task needs three or more tool calls, first call ${PLAN_TOOL} with every step you plan ` +
+  '(status pending, the first one in_progress), and call it again as each step finishes, keeping exactly one ' +
+  'in_progress. If a TodoWrite tool is available, use it instead. Skip this for quick one-step questions.'
 const ACCENT = '#d9825b'
 const GOOD = '#8fd18f'
 const BAD = '#e06c6c'
@@ -216,13 +220,18 @@ export const register: Register = (on, options) => {
 
     if (word === 'off' || word === 'on') {
       await update($, enabledA, () => word === 'on')
-      if (word === 'off') await clearAsking($)
+      if (word === 'off') {
+        // A task running right now will never reach turn.complete here, so end the clock's work and the phase too.
+        isWorking = false
+        await clearAsking($)
+        await setPhase($, null)
+      }
 
       return {
         text:
           word === 'on'
             ? 'Tool lens on.'
-            : 'Tool lens off: nothing is tracked or drawn. /lens on brings it back. The model may still be asked to post a plan this session; it is told when the lens is off.',
+            : 'Tool lens off: nothing is tracked or drawn. /lens on brings it back. The model is no longer asked to post a plan.',
       }
     }
     if (!isOn && (word === undefined || word === '' || word === 'min' || word === 'max')) {
@@ -253,18 +262,17 @@ export const register: Register = (on, options) => {
     return { text: help }
   })
 
-  // Asks the model to post its plan first. The section is composed once per session, so it cannot be taken back by
-  // /lens off; the plan tool answers "the lens is off" instead, which tells the model to stop.
-  on('prompt.compose', async ($, e, next) => {
-    const out = await next(e)
-    const text =
-      'Tool lens: for a task that needs three or more tool calls, first call ' +
-      `${PLAN_TOOL} with every step you plan (status pending, the first one in_progress). ` +
-      'Call it again whenever a step finishes or the plan changes, keeping exactly one step in_progress. ' +
-      'If a TodoWrite tool is available, use it instead. Skip this for quick one-step questions.'
+  // On a machine with many connected apps the engine lists every MCP tool behind ToolSearch, where the model never
+  // finds a tool it was not asked to look for. The plan tool is the one it must reach without searching.
+  on('tool.describe', { tool: PLAN_TOOL }, async ($, e, next) => ({ ...(await next(e)), isDeferred: false }))
 
-    return { sections: [...out.sections, { id: 'tool-lens-plan', text, scope: 'session' }] }
-  })
+  // Asks the model to post its plan first. It rides each prompt as hidden context: the composed system prompt is not
+  // a reliable place (a live helper agent never saw it), and this way /lens off takes it back at once.
+  on('prompt.submit', async ($, e, next) => {
+    if (!(await read($, enabledA))) return next(e)
+
+    return next({ ...e, context: [...(e.context ?? []), PLAN_REMINDER] })
+  }).catch(($, e, next) => next(e))
 
   // The turn's own request stream says what the model is doing: thinking, writing, or picking a tool.
   on('turn.step', async function* ($, e, next) {

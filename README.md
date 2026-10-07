@@ -4,7 +4,7 @@ Claude Code mods in one marketplace.
 
 | Plugin | Version | What it does |
 |---|---|---|
-| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.1 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
+| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.2 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
 
 ## tool-lens-mod
 
@@ -57,12 +57,12 @@ fails, the built-in wording is used.
 
 ### The plan tool
 
-The mod registers a `plan` tool and adds a short system-prompt section asking the model to post its plan first for
-tasks that need three or more tool calls, and to update it as steps finish. That is where `Step 4 of 7`, the
-percent and the per-step times come from. Without a plan the band shows `Step N` and a bar that fills with what has
-run. If a `TodoWrite` tool is available the model is told to use it instead. The instruction is composed once per
-session, so `/lens off` cannot take it back; while off, the `plan` tool answers that the lens is off and the model
-stops using it.
+The mod registers a `plan` tool, lists it directly in the model's tools (not behind tool search, where it would
+never be found among many connected apps), and attaches a short reminder to each prompt as hidden context: post the
+plan first for tasks that need three or more tool calls, and update it as steps finish. That is where `Step 4 of 7`,
+the percent and the per-step times come from. Without a plan the band shows `Step N` and a bar that fills with what
+has run. If a `TodoWrite` tool is available the model is told to use it instead. `/lens off` stops the reminder at
+once, and while off the `plan` tool answers that the lens is off.
 
 ## Install
 
@@ -96,7 +96,7 @@ For the desktop app, which takes no command-line flags, add the folder to the `e
 ```bash
 cd plugins/tool-lens-mod
 claude plugin validate .
-claude plugin test .          # 22 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, system prompt
+claude plugin test .          # 23 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
 ```
 
 The logic (summary, percent, bar shares, status wording, redaction, label prompt and parsing) lives in
