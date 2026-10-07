@@ -31,6 +31,7 @@ declare module 'claude-code' {
       prev: { steps: Step[]; turn: Turn | null } | null
       phase: Phase
       asking: string[]
+      enabled: boolean
     }
   }
 }

@@ -20,6 +20,8 @@ const prevA = atom({ plugin: 'tool-lens-mod', key: 'prev' } as const, null)
 const phaseA = atom({ plugin: 'tool-lens-mod', key: 'phase' } as const, null)
 // Calls the engine put to the permission dialog (the person decides), by tool_use_id.
 const askingA = atom({ plugin: 'tool-lens-mod', key: 'asking' } as const, [])
+// /lens off: nothing is tracked, drawn, labelled or asked of the model until /lens on.
+const enabledA = atom({ plugin: 'tool-lens-mod', key: 'enabled' } as const, true)
 
 // A bar of colored runs, laid out in percent of its own width so it fits whatever a "cell" measures on the
 // surface (glyph widths differ between the terminal and the desktop). The shares come from `barRuns`.
@@ -203,13 +205,29 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'lens' }, async ($, e) => {
     const [word, value] = e.args.trim().toLowerCase().split(/\s+/)
     const current = await read($, modeA)
+    const isOn = await read($, enabledA)
     const help =
-      `Tool lens: view ${current === 'max' ? 'expanded' : 'minimised'}, plain-language labels ${isSmart ? 'on' : 'off'}.\n` +
+      `Tool lens: ${isOn ? `on, view ${current === 'max' ? 'expanded' : 'minimised'}` : 'off'}, plain-language labels ${isSmart ? 'on' : 'off'}.\n` +
+      '/lens off | on  hide it and stop tracking, or bring it back\n' +
       '/lens          toggle expanded / minimised\n' +
       '/lens min|max  set the view\n' +
       '/lens labels on|off   reword skill, app and shell steps with a small model (setting: smartLabels)\n' +
       '/lens settings        this summary'
 
+    if (word === 'off' || word === 'on') {
+      await update($, enabledA, () => word === 'on')
+      if (word === 'off') await clearAsking($)
+
+      return {
+        text:
+          word === 'on'
+            ? 'Tool lens on.'
+            : 'Tool lens off: nothing is tracked or drawn. /lens on brings it back. The model may still be asked to post a plan this session; it is told when the lens is off.',
+      }
+    }
+    if (!isOn && (word === undefined || word === '' || word === 'min' || word === 'max')) {
+      return { text: 'Tool lens is off. /lens on turns it back on.' }
+    }
     if (word === undefined || word === '') {
       const mode = current === 'min' ? 'max' : 'min'
       await setMode($, mode)
@@ -235,9 +253,22 @@ export const register: Register = (on, options) => {
     return { text: help }
   })
 
+  // Asks the model to post its plan first. The section is composed once per session, so it cannot be taken back by
+  // /lens off; the plan tool answers "the lens is off" instead, which tells the model to stop.
+  on('prompt.compose', async ($, e, next) => {
+    const out = await next(e)
+    const text =
+      'Tool lens: for a task that needs three or more tool calls, first call ' +
+      `${PLAN_TOOL} with every step you plan (status pending, the first one in_progress). ` +
+      'Call it again whenever a step finishes or the plan changes, keeping exactly one step in_progress. ' +
+      'If a TodoWrite tool is available, use it instead. Skip this for quick one-step questions.'
+
+    return { sections: [...out.sections, { id: 'tool-lens-plan', text, scope: 'session' }] }
+  })
+
   // The turn's own request stream says what the model is doing: thinking, writing, or picking a tool.
   on('turn.step', async function* ($, e, next) {
-    if (e.agentId !== undefined) return yield* next(e)
+    if (e.agentId !== undefined || !(await read($, enabledA))) return yield* next(e)
 
     await setPhase($, 'waiting')
     await clearAsking($)
@@ -260,12 +291,14 @@ export const register: Register = (on, options) => {
   on('tool.check', async ($, e, next) => {
     const answer = await next(e)
     const id = e.tool_use_id
-    if (id !== undefined && answer.decision === 'ask') await update($, askingA, list => [...list, id])
+    if (id !== undefined && answer.decision === 'ask' && (await read($, enabledA))) await update($, askingA, list => [...list, id])
 
     return answer
   }).catch(($, e, next) => next(e))
 
   on('turn.start', async ($, e, next) => {
+    if (!(await read($, enabledA))) return next(e)
+
     const now = await $.clock.now()
     isWorking = true
     request = e.text
@@ -287,7 +320,7 @@ export const register: Register = (on, options) => {
 
   on('turn.complete', async ($, e, next) => {
     // A helper agent's own turns end here too; only the main task's end counts.
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined || !(await read($, enabledA))) return next(e)
 
     const now = await $.clock.now()
     isWorking = false
@@ -311,6 +344,11 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     if (e.agentId !== undefined) return next(e)
+    if (!(await read($, enabledA))) {
+      return String(e.tool) === PLAN_TOOL
+        ? { result: 'The tool lens is off, so no plan is shown. Carry on without calling this tool.' }
+        : next(e)
+    }
 
     const tool = String(e.tool)
     const input = e as unknown as Record<string, unknown>
@@ -363,6 +401,7 @@ export const register: Register = (on, options) => {
     const steps = await read($, stepsA)
     const mode = await read($, modeA)
     const hasTurn = (await read($, turnA)) !== null
+    if (!(await read($, enabledA))) return next(e)
 
     // Stay on screen once a turn has happened, even one with no tool calls (or only a plan); only a survey, or
     // having no history at all, hides it.
