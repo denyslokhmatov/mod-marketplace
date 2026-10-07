@@ -167,3 +167,68 @@ test('a task that never reported its end is closed when the next one starts', as
   expect(status).not.toMatch(/…$/)
   await ui.unmount()
 })
+
+const setup = ($: any, on: any) => {
+  mock.clock(on)
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+  on('turn.start', (_$: unknown, e: { turnId: string }) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'ok' }))
+}
+const read = (n: number) => ({ tool: 'Read', file_path: `/a/${n}.ts` }) as never
+
+test('the third tool call of a task with no plan is refused once, then the task goes on', async ($, on) => {
+  setup($, on)
+  await $.turn.start({ text: 'multi-step', turnId: 'g1' })
+  expect((await $.tool.call(read(1))).deny).toBeUndefined()
+  expect((await $.tool.call(read(2))).deny).toBeUndefined()
+  const refused = await $.tool.call(read(3))
+  expect(refused.deny).toContain('mcp__tool-lens-mod__plan')
+  expect(refused.deny).toContain('repeat this call')
+  // refused only once: the repeat goes through even if the model still has no plan
+  expect((await $.tool.call(read(3))).deny).toBeUndefined()
+  expect((await $.tool.call(read(4))).deny).toBeUndefined()
+  await $.turn.complete(done({ turnId: 'g1' }))
+
+  // a refused call is not a step: 4 calls ran, so 4 steps
+  const ui = await $.ui.mount({ plugin: 'tool-lens-mod', surface: 'terminal', component: 'AbovePrompt', props } as never)
+  expect((await ui.find({ key: 'step' }))?.text).toBe('4 steps')
+  await ui.unmount()
+})
+
+test('a plan posted in time means no refusal, and the count restarts with each task', async ($, on) => {
+  setup($, on)
+  await $.turn.start({ text: 'planned', turnId: 'g2' })
+  await $.tool.call(read(1))
+  await $.tool.call(plan([{ content: 'A', activeForm: 'Doing A', status: 'in_progress' }]))
+  for (const n of [2, 3, 4, 5]) expect((await $.tool.call(read(n))).deny).toBeUndefined()
+  await $.turn.complete(done({ turnId: 'g2' }))
+
+  await $.turn.start({ text: 'unplanned again', turnId: 'g3' })
+  await $.tool.call(read(1))
+  await $.tool.call(read(2))
+  expect((await $.tool.call(read(3))).deny).toBeDefined()
+})
+
+test('tool lookups do not count towards the gate, and TodoWrite counts as a plan', async ($, on) => {
+  setup($, on)
+  await $.turn.start({ text: 'lookups', turnId: 'g4' })
+  for (let i = 0; i < 4; i += 1) {
+    expect((await $.tool.call({ tool: 'ToolSearch', query: 'x', max_results: 1 } as never)).deny).toBeUndefined()
+  }
+  await $.tool.call(read(1))
+  await $.tool.call({ tool: 'TodoWrite', todos: [{ content: 'A', activeForm: 'Doing A', status: 'in_progress' }] } as never)
+  for (const n of [2, 3, 4]) expect((await $.tool.call(read(n))).deny).toBeUndefined()
+})
+
+test('/lens off and the requirePlan option both switch the gate off', async ($, on) => {
+  setup($, on)
+  await $.command.run({ command: 'lens', args: 'off' } as never)
+  await $.turn.start({ text: 'off', turnId: 'g5' })
+  for (const n of [1, 2, 3, 4]) expect((await $.tool.call(read(n))).deny).toBeUndefined()
+})
+
+test('requirePlan: false never refuses', { options: { requirePlan: false } }, async ($, on) => {
+  setup($, on)
+  await $.turn.start({ text: 'free', turnId: 'g6' })
+  for (const n of [1, 2, 3, 4]) expect((await $.tool.call(read(n))).deny).toBeUndefined()
+})

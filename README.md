@@ -4,7 +4,7 @@ Claude Code mods in one marketplace.
 
 | Plugin | Version | What it does |
 |---|---|---|
-| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.3 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
+| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.4 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
 
 ## tool-lens-mod
 
@@ -40,9 +40,10 @@ shows "Needs your approval: …" (best effort: the plugin API reports when the d
 | Option | Default | Effect |
 |---|---|---|
 | `smartLabels` | `true` | Reword skill, connected-app, tool-lookup and bare shell steps with a small model (`haiku`), in terms of your request: "Looking up your open CoBrain tasks" instead of "Loaded the tasks-sync skill". |
+| `requirePlan` | `true` | The plan gate (see below): the third tool call of a task that has posted no plan is refused once. |
 
-Change it with `/lens labels off`, or `/config tool-lens-mod.smartLabels=false`. When it is off, or if a label call
-fails, the built-in wording is used.
+Change `smartLabels` with `/lens labels off`, or either option with `/config tool-lens-mod.smartLabels=false` /
+`/config tool-lens-mod.requirePlan=false`. When labels are off, or if a label call fails, the built-in wording is used.
 
 ### Cost and privacy
 
@@ -63,6 +64,12 @@ plan first for tasks that need three or more tool calls, and update it as steps 
 the percent and the per-step times come from. Without a plan the band shows `Step N` and a bar that fills with what
 has run. If a `TodoWrite` tool is available the model is told to use it instead. `/lens off` stops the reminder at
 once, and while off the `plan` tool answers that the lens is off.
+
+**The plan gate.** A reminder alone is not reliable: a model can do the work first and post a tidy plan at the end,
+which shows the plan and percent only after the task is done. So the third tool call of a task that has posted no plan
+is refused once, with a note asking for the plan and a repeat of the call. It refuses at most once per task, never
+counts tool lookups, accepts `TodoWrite` as a plan, and is off under `/lens off` or `requirePlan=false`. The cost is one
+wasted call on a task that skipped the plan; a refused call is not shown as a step.
 
 ## Install
 
@@ -98,7 +105,7 @@ For the desktop app, which takes no command-line flags, add the folder to the `e
 ```bash
 cd plugins/tool-lens-mod
 claude plugin validate .
-claude plugin test .          # 26 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
+claude plugin test .          # 31 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
 ```
 
 The logic (summary, percent, bar shares, status wording, redaction, label prompt and parsing) lives in

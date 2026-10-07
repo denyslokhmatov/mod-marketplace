@@ -6,9 +6,15 @@ import { CATS, barRuns, classify, clip, counts, describe, fillOf, fmtMs, labelPr
 
 const PLAN_TOOL = 'mcp__tool-lens-mod__plan'
 const PLAN_REMINDER =
-  `Tool lens: if this task needs three or more tool calls, first call ${PLAN_TOOL} with every step you plan ` +
-  '(status pending, the first one in_progress), and call it again as each step finishes, keeping exactly one ' +
-  'in_progress. If a TodoWrite tool is available, use it instead. Skip this for quick one-step questions.'
+  `Tool lens: if this task needs three or more tool calls, your very first action must be a call to ${PLAN_TOOL} ` +
+  'listing every step you plan (status pending, the first one in_progress), before any read, search or command. ' +
+  'The person watches that plan fill in while you work, so posting it after the work is done is useless: if you ' +
+  'notice you have not posted one, post it at once with the finished steps marked completed. Call it again as each ' +
+  'step finishes, keeping exactly one in_progress. If a TodoWrite tool is available, use it instead. Skip this ' +
+  'for quick one-step questions.'
+const GATE_MESSAGE =
+  `Tool lens: this is the third tool call of this task and no plan has been posted. Call ${PLAN_TOOL} now with ` +
+  'every step you plan (mark the finished ones completed), then repeat this call.'
 const ACCENT = '#d9825b'
 const GOOD = '#8fd18f'
 const BAD = '#e06c6c'
@@ -167,7 +173,12 @@ async function clearAsking($: any) {
 
 export const register: Register = (on, options) => {
   const isSmart = options.smartLabels !== false
+  const isGated = options.requirePlan !== false
   let isWorking = false
+  // The plan gate: a task that has made two tool calls with no plan has its third refused once.
+  let calls = 0
+  let hasPlan = false
+  let hasGated = false
 
   on('session.start', async ($, e, next) => {
     await update($, modeA, () => 'min')
@@ -309,6 +320,9 @@ export const register: Register = (on, options) => {
 
     const now = await $.clock.now()
     isWorking = true
+    calls = 0
+    hasPlan = false
+    hasGated = false
     request = e.text
     const line = clip(redact(e.text.split('\n')[0] ?? ''), 70)
     // The previous task may never have reported its end (interrupted, failed): close it as stopped, so what is kept
@@ -368,9 +382,20 @@ export const register: Register = (on, options) => {
     const input = e as unknown as Record<string, unknown>
 
     if (tool === 'TodoWrite' || tool === PLAN_TOOL) {
+      hasPlan = true
       const list = (tool === 'TodoWrite' ? input.todos : input.steps) as Todo[] | undefined
       if (Array.isArray(list)) await update($, todosA, () => list)
       return tool === PLAN_TOOL ? { result: 'Plan saved. Carry on with the first step.' } : next(e)
+    }
+
+    // The gate. No await between the enabled check above and here, so parallel calls are counted one by one.
+    if (tool !== 'ToolSearch') {
+      if (isGated && !hasPlan && !hasGated && calls >= 2) {
+        hasGated = true
+
+        return { deny: GATE_MESSAGE }
+      }
+      calls += 1
     }
 
     const planned = await read($, todosA)
