@@ -311,15 +311,21 @@ export const register: Register = (on, options) => {
     isWorking = true
     request = e.text
     const line = clip(redact(e.text.split('\n')[0] ?? ''), 70)
+    // The previous task may never have reported its end (interrupted, failed): close it as stopped, so what is kept
+    // for a later no-tool turn is not left looking live, and drop its plan so open steps do not leak into this task.
     const before = await read($, stepsA)
     if (before.length > 0) {
       const beforeTurn = await read($, turnA)
-      await update($, prevA, () => ({ steps: before, turn: beforeTurn }))
+      const closed = before.map(one =>
+        one.status === 'running' ? { ...one, ms: now - one.startedAt, size: 'small' as const, status: 'error' as const } : one,
+      )
+      const ended = beforeTurn === null ? null : { ...beforeTurn, endedAt: beforeTurn.endedAt ?? now, reason: beforeTurn.reason ?? ('aborted' as const) }
+      await update($, prevA, () => ({ steps: closed, turn: ended }))
     }
     await clearAsking($)
     await setPhase($, 'waiting')
     await update($, stepsA, () => [])
-    await update($, todosA, list => (list.every(t => t.status === 'completed') ? [] : list))
+    await update($, todosA, () => [])
     await update($, nowA, () => now)
     await update($, turnA, old => ({ title: line || old?.title || 'Working', startedAt: now, endedAt: null }))
 
@@ -341,7 +347,7 @@ export const register: Register = (on, options) => {
       await update($, turnA, () => prev.turn)
       return next(e)
     }
-    await update($, turnA, old => (old === null ? old : { ...old, endedAt: now }))
+    await update($, turnA, old => (old === null ? old : { ...old, endedAt: now, reason: e.reason }))
     await update($, nowA, () => now)
     await update($, stepsA, list =>
       list.map(one => (one.status === 'running' ? { ...one, ms: now - one.startedAt, size: 'small', status: 'error' } : one)),

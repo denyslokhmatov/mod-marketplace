@@ -201,7 +201,9 @@ export const summarize = (s: Snapshot) => {
   const done = s.todos.filter(todo => todo.status === 'completed').length
   const current = s.todos.find(todo => todo.status === 'in_progress')
   const next = s.todos.find(todo => todo.status === 'pending')
-  const percent = percentOf(s.todos, s.steps, isWorking)
+  // A task that was stopped or failed has no 100%: it did not finish.
+  const didEnd = s.turn?.reason === undefined || s.turn.reason === 'answer'
+  const percent = didEnd ? percentOf(s.todos, s.steps, isWorking) : undefined
   const end = s.turn?.endedAt ?? s.now
   const elapsed = s.turn !== null && end > 0 ? Math.max(0, end - s.turn.startedAt) : 0
   const stepText =
@@ -213,10 +215,14 @@ export const summarize = (s: Snapshot) => {
   const isAsking = running !== undefined && s.asking.includes(running.id)
   const base = running
     ? isAsking ? `Needs your approval: ${running.title}` : running.doing
-    : isWorking ? phaseText(s.phase, s.steps[s.steps.length - 1], current) : 'Done'
+    : isWorking ? phaseText(s.phase, s.steps[s.steps.length - 1], current) : endWord(s.turn?.reason)
 
   return { isWorking, running, isAsking, current, next, percent, elapsed, stepText, base, more, activity: `${base}${more}`, done }
 }
+
+/** How a finished task is named: only an answered one is "Done". */
+export const endWord = (reason: Turn['reason']): string =>
+  reason === 'aborted' ? 'Stopped' : reason === 'error' ? 'Stopped by an error' : reason === 'refusal' ? 'Declined' : 'Done'
 
 export type Run = { cat: Cat; share: number }
 

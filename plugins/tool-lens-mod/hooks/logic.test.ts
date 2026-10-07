@@ -159,3 +159,12 @@ test('a reply is read as a label only when it is the JSON asked for', () => {
   expect(parseLabel('{"doing": 5}')).toBeNull()
   expect(parseLabel('{"doing":"Using key sk-abcdefghijklmnopqrstuv","done":"Used it"}')?.doing).toContain('•••')
 })
+
+test('a stopped, failed or declined task is not called done and has no 100%', () => {
+  const base = { steps: [step()], todos: [], now: 5000, phase: null, asking: [] as string[] }
+  for (const [reason, word] of [['answer', 'Done'], ['aborted', 'Stopped'], ['error', 'Stopped by an error'], ['refusal', 'Declined']] as const) {
+    const out = summarize({ ...base, turn: { ...over, reason } })
+    expect(out.base).toBe(word)
+    expect(out.percent).toBe(reason === 'answer' ? 100 : undefined)
+  }
+})

@@ -114,3 +114,56 @@ test('the plan tool is listed in front of the model, not behind tool search', as
   })
   expect(other.isDeferred).toBe(true)
 })
+
+const plan = (steps: { content: string; activeForm: string; status: string }[]) =>
+  ({ tool: 'mcp__tool-lens-mod__plan', steps }) as never
+
+test('a task that was stopped says so, and its open plan does not leak into the next task', async ($, on) => {
+  mock.clock(on)
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'ok' }))
+  const band = async () =>
+    $.ui.mount({ plugin: 'tool-lens-mod', surface: 'terminal', component: 'AbovePrompt', props } as never)
+
+  await $.turn.start({ text: 'first', turnId: 's1' })
+  await $.tool.call(plan([
+    { content: 'A', activeForm: 'Doing A', status: 'completed' },
+    { content: 'B', activeForm: 'Doing B', status: 'in_progress' },
+    { content: 'C', activeForm: 'Doing C', status: 'pending' },
+  ]))
+  await $.tool.call({ tool: 'Read', file_path: '/a/b.ts' })
+  await $.turn.complete(done({ turnId: 's1', isAborted: true, reason: 'aborted' }))
+
+  const stopped = await band()
+  expect((await stopped.find({ key: 'status' }))?.text).toMatch(/^Stopped/)
+  expect(await stopped.find({ key: 'status' })).toBeDefined()
+  await stopped.unmount()
+
+  // the next task starts while the first one's plan is still open (B in progress, C pending)
+  await $.turn.start({ text: 'second', turnId: 's2' })
+  await $.tool.call({ tool: 'Read', file_path: '/c/d.ts' })
+  await $.turn.complete(done({ turnId: 's2' }))
+  const next = await band()
+  expect((await next.find({ key: 'step' }))?.text).toBe('1 step')
+  expect((await next.find({ key: 'status' }))?.text).toMatch(/^Done/)
+  await next.unmount()
+})
+
+test('a task that never reported its end is closed when the next one starts', async ($, on) => {
+  mock.clock(on)
+  on('tool.call', () => ({ result: 'ok', text: 'ok' }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'ok' }))
+
+  await $.turn.start({ text: 'dies mid-way', turnId: 'x1' })
+  await $.tool.call({ tool: 'Read', file_path: '/a/b.ts' })
+  // no turn.complete: the task failed without reporting. The next one starts and uses no tools.
+  await $.turn.start({ text: 'just chat', turnId: 'x2' })
+  await $.turn.complete(done({ turnId: 'x2' }))
+  const ui = await $.ui.mount({ plugin: 'tool-lens-mod', surface: 'terminal', component: 'AbovePrompt', props } as never)
+  const status = (await ui.find({ key: 'status' }))?.text ?? ''
+  expect(status).toMatch(/^Stopped/)
+  expect(status).not.toMatch(/…$/)
+  await ui.unmount()
+})

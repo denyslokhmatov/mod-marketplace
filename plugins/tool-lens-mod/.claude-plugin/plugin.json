@@ -1,6 +1,6 @@
 {
   "name": "tool-lens-mod",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Plain-language, live view of what the agent is doing: a one-line band above the prompt that expands upward into the plan, tool calls and progress.",
   "types": "./types/index.d.ts",
   "userConfig": {

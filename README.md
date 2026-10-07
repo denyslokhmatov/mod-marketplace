@@ -4,7 +4,7 @@ Claude Code mods in one marketplace.
 
 | Plugin | Version | What it does |
 |---|---|---|
-| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.2 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
+| [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.3 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
 
 ## tool-lens-mod
 
@@ -90,13 +90,15 @@ For the desktop app, which takes no command-line flags, add the folder to the `e
 - The band is drawn above the prompt on the terminal and the desktop app. Percent-width boxes keep the bar inside the
   available width on both; the minimised bar is half a row tall on the desktop and a full row on the terminal.
 - A helper agent's own turns and tool calls are not counted as steps; the helper appears as one step.
+- A task that was stopped, failed or declined says so (`Stopped`, `Stopped by an error`, `Declined`) with no percent, and
+  its open plan does not carry into the next task. A task that never reported its end is closed when the next one starts.
 
 ## Develop
 
 ```bash
 cd plugins/tool-lens-mod
 claude plugin validate .
-claude plugin test .          # 23 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
+claude plugin test .          # 26 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
 ```
 
 The logic (summary, percent, bar shares, status wording, redaction, label prompt and parsing) lives in

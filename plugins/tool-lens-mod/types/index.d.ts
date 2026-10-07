@@ -17,7 +17,9 @@ export type Step = {
 // What the model is doing right now, from the turn's own request stream (null between requests).
 export type Phase = 'waiting' | 'thinking' | 'writing' | 'choosing' | null
 
-export type Turn = { title: string; startedAt: number; endedAt: number | null }
+// How a finished turn ended: answered, interrupted, declined by the model, or cut off by an error.
+export type Ending = 'answer' | 'aborted' | 'refusal' | 'error'
+export type Turn = { title: string; startedAt: number; endedAt: number | null; reason?: Ending }
 export type Todo = { content: string; activeForm: string; status: 'pending' | 'in_progress' | 'completed' }
 
 declare module 'claude-code' {
