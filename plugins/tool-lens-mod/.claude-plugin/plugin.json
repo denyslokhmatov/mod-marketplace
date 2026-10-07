@@ -1,8 +1,16 @@
 {
   "name": "tool-lens-mod",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Plain-language, live view of what the agent is doing: a one-line band above the prompt that expands upward into the plan, tool calls and progress.",
   "types": "./types/index.d.ts",
+  "userConfig": {
+    "smartLabels": {
+      "type": "boolean",
+      "title": "Plain-language step labels",
+      "description": "Ask a small model to word skill, connected-app and shell steps in terms of your request (for example \"Looking up your open CoBrain tasks\"). Sends your request and the redacted step to the model, one short call per step. Off keeps the built-in wording.",
+      "default": true
+    }
+  },
   "author": {
     "name": "Denys Lokhmatov"
   },

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { Phase, Step, Todo, Turn } from '../types'
-import { CATS, barRuns, classify, clip, counts, describe, fillOf, fmtMs, sizeOf, summarize, timeUnder } from './lens'
+import { CATS, barRuns, classify, clip, counts, describe, fillOf, fmtMs, labelPrompt, needsLabel, parseLabel, redact, sizeOf, summarize, timeUnder } from './lens'
 
 const PLAN_TOOL = 'mcp__tool-lens-mod__plan'
 const ACCENT = '#d9825b'
@@ -124,6 +124,29 @@ const compactRow = (ui: any, step: Step, now: number, onPress: () => void, room:
 }
 
 let lastPhase: Phase = null
+let request = ''
+let inflight = 0
+const labels = new Map<string, { doing: string; done: string }>()
+
+// Asks a small model for a plain label of a step in the person's own terms, then swaps it in. Any failure leaves the
+// built-in wording, which is already there. The prompt carries redacted text only.
+async function relabel($: any, id: string, key: string, prompt: string) {
+  let label = labels.get(key)
+  if (label === undefined) {
+    if (inflight >= 3) return
+    inflight += 1
+    try {
+      const reply = await $.model.complete({ model: 'haiku', prompt, maxTokens: 100 })
+      label = reply.isAnswered ? (parseLabel(reply.text) ?? undefined) : undefined
+    } finally {
+      inflight -= 1
+    }
+    if (label === undefined) return
+    labels.set(key, label)
+  }
+  const found = label
+  await update($, stepsA, list => list.map(one => (one.id === id ? { ...one, title: found.done, doing: found.doing } : one)))
+}
 
 // The phase changes a few times a turn; writing it only when it differs keeps the band from redrawing per chunk.
 async function setPhase($: any, phase: Phase) {
@@ -136,7 +159,8 @@ async function clearAsking($: any) {
   if ((await read($, askingA)).length > 0) await update($, askingA, () => [])
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  const isSmart = options.smartLabels !== false
   let isWorking = false
 
   on('session.start', async ($, e, next) => {
@@ -166,7 +190,7 @@ export const register: Register = on => {
     })
     await $.command.register({
       name: 'lens',
-      description: 'Tool lens view: /lens min (one line) or /lens max (expanded, grows upward)',
+      description: 'Tool lens: /lens (toggle), /lens min, /lens max, /lens labels on|off, /lens settings',
     })
     // One ticker for the whole session keeps elapsed times live while a turn runs.
     $.clock.every(1000, () => {
@@ -177,23 +201,38 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'lens' }, async ($, e) => {
-    const arg = e.args.trim().toLowerCase()
+    const [word, value] = e.args.trim().toLowerCase().split(/\s+/)
     const current = await read($, modeA)
-    const mode = arg === 'min' || arg === 'max' ? arg : current === 'min' ? 'max' : 'min'
-    await setMode($, mode)
+    const help =
+      `Tool lens: view ${current === 'max' ? 'expanded' : 'minimised'}, plain-language labels ${isSmart ? 'on' : 'off'}.\n` +
+      '/lens          toggle expanded / minimised\n' +
+      '/lens min|max  set the view\n' +
+      '/lens labels on|off   reword skill, app and shell steps with a small model (setting: smartLabels)\n' +
+      '/lens settings        this summary'
 
-    return { text: mode === 'max' ? 'Tool lens expanded.' : 'Tool lens minimised.' }
-  })
+    if (word === undefined || word === '') {
+      const mode = current === 'min' ? 'max' : 'min'
+      await setMode($, mode)
 
-  on('prompt.compose', async ($, e, next) => {
-    const out = await next(e)
-    const text =
-      'Tool lens: for a task that needs three or more tool calls, first call ' +
-      `${PLAN_TOOL} with every step you plan (status pending, the first one in_progress). ` +
-      'Call it again whenever a step finishes or the plan changes, keeping exactly one step in_progress. ' +
-      'If a TodoWrite tool is available, use it instead. Skip this for quick one-step questions.'
+      return { text: mode === 'max' ? 'Tool lens expanded.' : 'Tool lens minimised.' }
+    }
+    if (word === 'min' || word === 'max') {
+      await setMode($, word)
 
-    return { sections: [...out.sections, { id: 'tool-lens-plan', text, scope: 'session' }] }
+      return { text: word === 'max' ? 'Tool lens expanded.' : 'Tool lens minimised.' }
+    }
+    if (word === 'labels' && (value === 'on' || value === 'off')) {
+      try {
+        const done = await $.config.set({ key: 'tool-lens-mod.smartLabels', value: value === 'on' })
+        if ('deny' in done && done.deny !== undefined) return { text: `Could not change the setting: ${done.deny}` }
+      } catch {
+        return { text: `Could not change the setting here. Set smartLabels to ${value === 'on'} under this plugin's options in the config menu or settings.json.` }
+      }
+
+      return { text: `Plain-language labels ${value}. The mod reloads to apply it.` }
+    }
+
+    return { text: help }
   })
 
   // The turn's own request stream says what the model is doing: thinking, writing, or picking a tool.
@@ -229,7 +268,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     const now = await $.clock.now()
     isWorking = true
-    const line = clip(e.text.split('\n')[0] ?? '', 70)
+    request = e.text
+    const line = clip(redact(e.text.split('\n')[0] ?? ''), 70)
     const before = await read($, stepsA)
     if (before.length > 0) {
       const beforeTurn = await read($, turnA)
@@ -289,6 +329,12 @@ export const register: Register = on => {
     const id = e.tool_use_id
     const step: Step = { id, cat: classify(tool), title, doing, todo, detail, startedAt: started, ms: null, size: null, status: 'running' }
     await update($, stepsA, list => [...list, step].slice(-200))
+    if (isSmart && needsLabel(tool, input)) {
+      const prompt = labelPrompt(request, todo, tool, detail)
+      $.clock.after(0, () => {
+        void relabel($, id, `${request}|${tool}|${detail}`, prompt)
+      })
+    }
 
     let ran
     try {

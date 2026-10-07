@@ -36,3 +36,15 @@ test('the band survives a task completing', async ($, on) => {
     await chat.unmount()
   }
 })
+
+test('/lens answers settings and unknown words with help instead of toggling', async $ => {
+  const before = await $.command.run({ command: 'lens', args: 'settings' } as never)
+  expect(before.text).toContain('smartLabels')
+  expect(before.text).toContain('labels on|off')
+  const odd = await $.command.run({ command: 'lens', args: 'whatever' } as never)
+  expect(odd.text).toContain('/lens labels on|off')
+  const max = await $.command.run({ command: 'lens', args: 'max' } as never)
+  expect(max.text).toBe('Tool lens expanded.')
+  const again = await $.command.run({ command: 'lens', args: 'settings' } as never)
+  expect(again.text).toContain('expanded')
+})

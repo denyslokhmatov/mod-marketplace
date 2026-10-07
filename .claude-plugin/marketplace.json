@@ -5,14 +5,14 @@
   },
   "metadata": {
     "description": "Claude Code mods: live, human-readable views of what the agent is doing.",
-    "version": "0.1.0"
+    "version": "0.3.0"
   },
   "plugins": [
     {
       "name": "tool-lens-mod",
       "source": "./plugins/tool-lens-mod",
       "description": "Plain-language, live view of what the agent is doing: a one-line band above the prompt that expands upward into the plan, tool calls and progress.",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "category": "productivity",
       "keywords": [
         "transparency",

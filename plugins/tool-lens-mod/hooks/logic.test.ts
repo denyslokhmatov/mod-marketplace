@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import type { Step, Todo, Turn } from '../types'
-import { barRuns, fillOf, percentOf, phaseText, redact, summarize, timeUnder } from './lens'
+import { barRuns, describe, fillOf, labelPrompt, needsLabel, parseLabel, percentOf, phaseText, redact, summarize, timeUnder } from './lens'
 
 const step = (over: Partial<Step> = {}): Step => ({
   id: 'a',
@@ -119,4 +119,43 @@ test('a finished turn with no tool calls still summarizes instead of vanishing',
   const none = summarize({ steps: [], turn: over, todos: [], now: 5000, phase: null, asking: [] })
   expect(none.stepText).toBe('No tool calls')
   expect(none.activity).toBe('Done')
+})
+
+test('apps and skills read plainly even without a model label', () => {
+  const planner = describe('mcp__plugin_ops-microsoft-planner-macos-arm64_microsoft-planner__list-premium-project-tasks', {})
+  expect(planner.title).toBe('Microsoft planner: list premium project tasks')
+  expect(describe('mcp__370a5e26-f945-4827-b1f5-048a4fe007d5__jira_get_issue', { issue_key: 'PROJ-482' }).title).toBe('Jira: get issue')
+  expect(describe('Skill', { skill: 'tasks-sync' }).title).toBe('Used the tasks sync skill')
+  expect(describe('Skill', { skill: 'plugin:tasks-sync', args: 'cobrain' }).doing).toBe('Following the tasks sync skill: cobrain')
+})
+
+test('only steps whose own wording says little are sent for a label', () => {
+  expect(needsLabel('Skill', { skill: 'x' })).toBe(true)
+  expect(needsLabel('ToolSearch', { query: 'x' })).toBe(true)
+  expect(needsLabel('mcp__a__b', {})).toBe(true)
+  expect(needsLabel('Bash', { command: 'grep -n x y' })).toBe(true)
+  expect(needsLabel('Bash', { command: 'ls', description: 'List files' })).toBe(false)
+  expect(needsLabel('Read', { file_path: '/a/b' })).toBe(false)
+  expect(needsLabel('Grep', { pattern: 'x' })).toBe(false)
+})
+
+test('the label prompt carries the request and hides secrets in it', () => {
+  const prompt = labelPrompt('what is my CoBrain tasks? token=abcd1234secret99', 'Find tasks', 'Skill', 'skill · tasks-sync')
+  expect(prompt).toContain('CoBrain tasks')
+  expect(prompt).toContain('Find tasks')
+  expect(prompt).toContain('tasks-sync')
+  expect(prompt).not.toContain('abcd1234secret99')
+  expect(prompt).toContain('{"doing"')
+})
+
+test('a reply is read as a label only when it is the JSON asked for', () => {
+  expect(parseLabel('{"doing":"Looking up your CoBrain tasks","done":"Looked up your CoBrain tasks."}')).toEqual({
+    doing: 'Looking up your CoBrain tasks',
+    done: 'Looked up your CoBrain tasks',
+  })
+  expect(parseLabel('Sure! {"doing":"Checking tasks","done":"Checked tasks"} hope that helps')).toEqual({ doing: 'Checking tasks', done: 'Checked tasks' })
+  expect(parseLabel('no json here')).toBeNull()
+  expect(parseLabel('{"doing":"","done":"x"}')).toBeNull()
+  expect(parseLabel('{"doing": 5}')).toBeNull()
+  expect(parseLabel('{"doing":"Using key sk-abcdefghijklmnopqrstuv","done":"Used it"}')?.doing).toContain('•••')
 })

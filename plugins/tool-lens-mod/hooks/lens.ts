@@ -100,7 +100,16 @@ const describeRaw = (tool: string, input: Record<string, unknown>): Described =>
       return { title: clip(why || command, 70), doing: `Running: ${clip(why || command, 60)}`, detail: `bash · ${clip(command, 70)}` }
     }
     case 'Skill':
-      return { title: `Loaded the “${str(input, 'skill')}” skill`, doing: `Following the “${str(input, 'skill')}” skill`, detail: `skill · ${str(input, 'skill')}` }
+    {
+      const name = str(input, 'skill').replace(/^.*:/, '').replace(/[-_]+/g, ' ')
+      const args = str(input, 'args')
+
+      return {
+        title: `Used the ${name} skill${args ? `: ${clip(args, 40)}` : ''}`,
+        doing: `Following the ${name} skill${args ? `: ${clip(args, 40)}` : ''}`,
+        detail: `skill · ${str(input, 'skill')}${args ? ` ${clip(args, 40)}` : ''}`,
+      }
+    }
     case 'Agent':
     case 'Task': {
       const kind = str(input, 'subagent_type') || 'general'
@@ -117,11 +126,12 @@ const describeRaw = (tool: string, input: Record<string, unknown>): Described =>
     const parts = tool.split('__')
     const server = parts[1] ?? ''
     const name = parts.slice(2).join('__') || tool
-    // Named servers carry the app in the server name; id-named ones carry it as the tool's first word.
-    const isNamed = server !== '' && !/^[0-9a-f]{8}-/.test(server) && !server.startsWith('plugin_')
-    const words = name.split('_')
-    const app = isNamed ? server : (words[0] ?? name)
-    const rest = isNamed ? words : words.slice(1)
+    // The app is the server's name when it has one (`plugin_x_<app>` keeps its last part), else the tool's first word.
+    const isId = /^[0-9a-f]{8}-/.test(server)
+    const serverApp = server.startsWith('plugin_') ? (server.split('_').pop() ?? server) : server
+    const words = name.split(/[_-]+/).filter(Boolean)
+    const app = isId || serverApp === '' ? (words[0] ?? name) : serverApp.replace(/-/g, ' ')
+    const rest = isId || serverApp === '' ? words.slice(1) : words
     const action = rest.join(' ') || name
     const arg = firstArg(input)
     return {
@@ -248,4 +258,43 @@ export const timeUnder = (steps: readonly Step[], content: string, now: number):
   if (own.length === 0) return null
 
   return own.reduce((sum, step) => sum + (step.ms ?? Math.max(0, now - step.startedAt)), 0)
+}
+
+/** Steps whose built-in wording says little: skills, connected apps, tool lookups, bare shell commands, unknown tools. */
+export const needsLabel = (tool: string, input: Record<string, unknown>): boolean =>
+  tool === 'Skill' ||
+  tool === 'ToolSearch' ||
+  tool.startsWith('mcp__') ||
+  (tool === 'Bash' && str(input, 'description') === '') ||
+  classify(tool) === 'other'
+
+/** The one-message prompt that asks a small model for a plain label of a step, in the person's own terms. */
+export const labelPrompt = (request: string, plan: string, tool: string, detail: string): string =>
+  [
+    'You label one step an AI assistant is taking, so a non-technical person can follow along.',
+    `The person asked: "${clip(redact(request), 300)}"`,
+    plan === '' ? '' : `The current step of its plan: "${clip(redact(plan), 100)}"`,
+    `The step is a call to: ${tool} (${clip(redact(detail), 200)})`,
+    'Reply with exactly one line of JSON: {"doing":"...","done":"..."}',
+    '"doing": what it is doing now, present tense, at most 8 words, about the goal and not the tool, e.g. "Looking up your open CoBrain tasks".',
+    '"done": the same in past tense, e.g. "Looked up your open CoBrain tasks".',
+    'No tool names, ids or jargon. No quotes inside the values.',
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+/** Reads the model's reply as a label; null when it is not the one JSON line asked for or is empty. */
+export const parseLabel = (reply: string): { doing: string; done: string } | null => {
+  const match = /\{[^{}]*\}/.exec(reply)
+  if (match === null) return null
+  try {
+    const data = JSON.parse(match[0]) as Record<string, unknown>
+    const tidy = (value: unknown): string => (typeof value === 'string' ? redact(clip(value, 80)).replace(/[.\s]+$/, '') : '')
+    const doing = tidy(data.doing)
+    const done = tidy(data.done)
+
+    return doing.length >= 3 && done.length >= 3 ? { doing, done } : null
+  } catch {
+    return null
+  }
 }
