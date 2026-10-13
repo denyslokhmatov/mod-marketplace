@@ -92,28 +92,115 @@ Only the main thread counts; helper agents' turns are ignored. No settings, no c
 
 ## Install
 
+### Requirements
+
+- Claude Code with mod (function-hook plugin) support; tested on Claude Code 2.1.295. Check with `claude --version`.
+- Read access to the GitHub repo `denyslokhmatov/mod-marketplace`. The short form `denyslokhmatov/mod-marketplace`
+  clones over SSH (`git@github.com:...`), so it needs a GitHub SSH key with access. Without SSH, use the HTTPS URL
+  `https://github.com/denyslokhmatov/mod-marketplace.git` (git asks for credentials if the repo is private).
+
+### Terminal (recommended)
+
 ```bash
 claude plugin marketplace add denyslokhmatov/mod-marketplace
 claude plugin install tool-lens-mod@mods
 claude plugin install token-weather@mods
 ```
 
-Or load one mod straight from disk, without installing:
+Without an SSH key, add the marketplace over HTTPS instead of the first line:
 
 ```bash
-claude --plugin-dir ./plugins/tool-lens-mod
+claude plugin marketplace add https://github.com/denyslokhmatov/mod-marketplace.git
 ```
 
-For the desktop app, which takes no command-line flags, add the folder to the `env` block of `~/.claude/settings.json`:
+The marketplace is named `mods` (from `marketplace.json`), so plugin ids are `<plugin>@mods`. Install only the ones you
+want. Installs go to user scope (all projects). Start a new Claude Code session for the mods to load.
+
+Verify with `claude plugin list`: each should show `Status: ✔ enabled`. If one shows disabled:
+
+```bash
+claude plugin enable tool-lens-mod@mods
+```
+
+The install of `tool-lens-mod` prints "2 userConfig options not yet set". This is expected: both options have defaults
+(`smartLabels` and `requirePlan` are both `true`). See the Settings table above, or change them later with
+`/config tool-lens-mod.smartLabels=false`.
+
+### Desktop app
+
+Plugins installed from the terminal as above are user-scope and are also used by the Code tab of the Claude desktop
+app, after a new session.
+
+If installed mods do not show up, clone the repo and point the app at the folders, since the app takes no command-line
+flags:
+
+```bash
+git clone https://github.com/denyslokhmatov/mod-marketplace.git ~/mod-marketplace
+```
+
+Then add this to `~/.claude/settings.json` (merge into an existing `env` block, do not replace the file):
 
 ```json
-{ "env": { "CLAUDE_CODE_PLUGIN_DIRS": "/absolute/path/to/plugins/tool-lens-mod" } }
+{
+  "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/mod-marketplace/plugins/tool-lens-mod:/Users/you/mod-marketplace/plugins/token-weather"
+  }
+}
 ```
+
+Use absolute paths (no `~`) and separate several folders with `:`. Do not also install the same mod from the
+marketplace, or it loads twice.
+
+### Try without installing
+
+From a clone, for one session only:
+
+```bash
+claude --plugin-dir ~/mod-marketplace/plugins/tool-lens-mod --plugin-dir ~/mod-marketplace/plugins/token-weather
+```
+
+`--plugin-dir` can be repeated.
+
+### Update
+
+```bash
+claude plugin marketplace update mods
+claude plugin update tool-lens-mod@mods
+claude plugin update token-weather@mods
+```
+
+For a clone used with `--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`:
+
+```bash
+git -C ~/mod-marketplace pull
+```
+
+Start a new session afterwards.
+
+### Uninstall
+
+```bash
+claude plugin uninstall tool-lens-mod@mods
+claude plugin uninstall token-weather@mods
+claude plugin marketplace remove mods
+```
+
+For the desktop fallback, remove the `CLAUDE_CODE_PLUGIN_DIRS` entry.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `marketplace add` fails with "Permission denied (publickey)" or "Repository not found" | No SSH access. Add the marketplace with the HTTPS URL (see Terminal), or ask the repo owner for read access. |
+| Mod not visible | Start a new session, check `claude plugin list`, and enable it. |
+| Band appears twice | The same mod is loaded both installed and via `--plugin-dir`, `CLAUDE_CODE_PLUGIN_DIRS` or a shell alias. Keep one. |
+| `claude plugin install` says plugin not found | Run `claude plugin marketplace update mods`, and check the id ends in `@mods`. |
 
 ## Notes
 
-- The mods are function-hook plugins (`hooks/hooks.json` names a `register.tsx` module). Loading them from an
-  installed plugin has not been verified on every Claude Code build; `--plugin-dir` is the path that has been tested.
+- The mods are function-hook plugins (`hooks/hooks.json` names a `register.tsx` module). They need a Claude Code build
+  with mod support; if an installed mod does not load on your build, load it from a clone with `--plugin-dir` (see
+  Install).
 - The band is drawn above the prompt on the terminal and the desktop app. Percent-width boxes keep the bar inside the
   available width on both; the minimised bar is half a row tall on the desktop and a full row on the terminal.
 - A helper agent's own turns and tool calls are not counted as steps; the helper appears as one step.
