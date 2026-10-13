@@ -4,8 +4,8 @@
     "name": "Denys Lokhmatov"
   },
   "metadata": {
-    "description": "Claude Code mods: live, human-readable views of what the agent is doing.",
-    "version": "0.3.4"
+    "description": "Claude Code mods: live, human-readable views of what the agent is doing and what it costs.",
+    "version": "0.4.0"
   },
   "plugins": [
     {
@@ -18,6 +18,20 @@
         "transparency",
         "progress",
         "tools",
+        "mod"
+      ]
+    },
+    {
+      "name": "token-weather",
+      "source": "./plugins/token-weather",
+      "description": "Live forecast of the context window above the prompt: how full it is, how it grew, whether the prompt cache is warm, and what the session cost.",
+      "version": "0.2.0",
+      "category": "productivity",
+      "keywords": [
+        "context",
+        "tokens",
+        "cache",
+        "cost",
         "mod"
       ]
     }

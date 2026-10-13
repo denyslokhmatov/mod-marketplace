@@ -1,0 +1,17 @@
+{
+  "name": "token-weather",
+  "version": "0.2.0",
+  "description": "Live forecast of the context window above the prompt: how full it is, how it grew, whether the prompt cache is warm, and what the session cost.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "Denys Lokhmatov",
+    "email": "denys_lokhmatov@epam.com"
+  },
+  "keywords": [
+    "context",
+    "tokens",
+    "cache",
+    "cost",
+    "mod"
+  ]
+}

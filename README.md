@@ -5,6 +5,7 @@ Claude Code mods in one marketplace.
 | Plugin | Version | What it does |
 |---|---|---|
 | [`tool-lens-mod`](plugins/tool-lens-mod) | 0.3.4 | A one-line band above the prompt that says in plain language what the agent is doing, and expands upward into the plan, tool calls, times and progress. |
+| [`token-weather`](plugins/token-weather) | 0.2.0 | A weather-style forecast of the context window above the prompt: how full it is, how it grew, whether the prompt cache is still warm, and what the session cost. |
 
 ## tool-lens-mod
 
@@ -71,11 +72,30 @@ is refused once, with a note asking for the plan and a repeat of the call. It re
 counts tool lookups, accepts `TodoWrite` as a plan, and is off under `/lens off` or `requirePlan=false`. The cost is one
 wasted call on a task that skipped the plan; a refused call is not shown as a step.
 
+## token-weather
+
+One line above the prompt, updated after each turn:
+
+```
+☂ Showers  58%  116.2k / 200k  ▂▃▃▄▅▅  ▲ +8.4k last turn        🔥 Warm  reused 97% of context (52 min left) · spent $1.84
+```
+
+- **Forecast** from how full the context window is: `☀ Clear` (<25%), `☁ Cloudy` (25%), `☂ Showers` (50%),
+  `☇ Storm` (75%), `↯ Compact soon` (90%+).
+- tokens used of the window, a sparkline of the last 12 turns, and the change since the previous turn
+- **Cache:** `🔥 Warm` when at least half of the last request's input came from the prompt cache and the cache has not
+  expired yet, otherwise `🧊 Cold`; with the share reused and the minutes left (TTL minus a one-minute margin). The TTL
+  (5 min or 1 h) is read from the session transcript; on desktop-hosted sessions, which cannot run processes, it stays 1 h.
+- the session's spend so far, when the engine reports it
+
+Only the main thread counts; helper agents' turns are ignored. No settings, no commands, no model calls.
+
 ## Install
 
 ```bash
 claude plugin marketplace add denyslokhmatov/mod-marketplace
 claude plugin install tool-lens-mod@mods
+claude plugin install token-weather@mods
 ```
 
 Or load one mod straight from disk, without installing:
@@ -106,6 +126,10 @@ For the desktop app, which takes no command-line flags, add the folder to the `e
 cd plugins/tool-lens-mod
 claude plugin validate .
 claude plugin test .          # 31 tests: logic, rendering on both surfaces, task lifecycle, labels, off/on, plan reminder and listing
+
+cd ../token-weather
+claude plugin validate .
+claude plugin test .          # 10 tests: forecast thresholds, formatting, chart, cache hit rate, warmth, TTL parsing
 ```
 
 The logic (summary, percent, bar shares, status wording, redaction, label prompt and parsing) lives in
